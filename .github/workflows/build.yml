@@ -2,8 +2,8 @@ name: Build and Push Docker Image
 
 on:
   schedule:
-    - cron: '0 0 * * *'
-  workflow_dispatch:
+    - cron: '0 0 * * *'  # Ежедневный триггер в 00:00
+  workflow_dispatch:  # Ручной запуск
 
 jobs:
   check_chromium_version:
@@ -28,7 +28,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: ./cache/current_chromium_version.txt
-          key: chromium-version-cache-${{ github.run_id }}
+          key: chromium-version-cache
 
       - name: Check Chromium Version
         id: get_full_version
@@ -57,9 +57,53 @@ jobs:
               echo "build_required=true" >> $GITHUB_ENV
             fi
           fi
+        outputs:
+          build_required: ${{ steps.compare_versions.outputs.build_required }}
 
       - name: Cache the current Chromium version
         uses: actions/cache@v3
         with:
           path: ./cache/current_chromium_version.txt
           key: chromium-version-cache-${{ github.run_id }}
+
+      - name: Post Cache the current Chromium version
+        if: always()
+        run: |
+          tar --posix -cf cache.tzst --exclude cache.tzst -P -C ./cache current_chromium_version.txt
+          echo "Cache saved"
+
+  build_and_push:
+    needs: check_chromium_version
+    runs-on: ubuntu-22.04
+    if: needs.check_chromium_version.outputs.build_required == 'true'
+    steps:
+      - name: Clone Dockerfile Repository
+        uses: actions/checkout@v2
+        with:
+          repository: erolatex/selenoid_chromium
+          path: images/static/chromium
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and Push Docker Image
+        run: |
+          cd images/static/chromium
+          docker buildx build --no-cache --build-arg BASE_IMAGE_TAG=1.0.1 \
+            --platform linux/amd64,linux/arm64 \
+            -t erolatex/selenoid_chromium:${{ needs.check_chromium_version.outputs.short_version }} \
+            -t erolatex/selenoid_chromium:latest \
+            --push .
+
+      - name: Post Log in to Docker Hub
+        if: always()
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
