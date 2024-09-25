@@ -60,8 +60,6 @@ jobs:
               echo "build_required=true" >> $GITHUB_ENV
             fi
           fi
-        env:
-          build_required: ${{ steps.compare_versions.outputs.build_required }}
 
       # Save the current Chromium version in the cache
       - name: Cache the current Chromium version
@@ -80,7 +78,7 @@ jobs:
   build_and_push:
     needs: check_chromium_version
     runs-on: ubuntu-22.04
-    if: env.build_required == 'true'
+    if: ${{ env.build_required == 'true' }}
 
     steps:
       # Clone the Dockerfile repository
@@ -94,7 +92,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
 
-      # Log in to Docker Hub
+      # Log in to Docker Hub using environment secrets
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
