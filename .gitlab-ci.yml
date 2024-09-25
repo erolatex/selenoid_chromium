@@ -1,0 +1,84 @@
+stages:
+  - check
+  - clone
+  - build
+
+variables:
+  BASE_IMAGE_TAG: "1.0.1"
+  IMAGE_NAME: "erolatex/selenoid_chromium"
+  PLATFORM: "linux/amd64,linux/arm64"
+  REPO_URL: "https://github.com/erolatex/images.git"
+  DOCKERFILE_PATH: "static/chromium/Dockerfile"
+
+cache:
+  key: chromium-version-cache
+  paths:
+    - last_chromium_version.txt
+
+check_chromium_update:
+  stage: check
+  script:
+    # Install necessary tools and add PPA
+    - apt-get update && apt-get install -y software-properties-common git
+    - add-apt-repository -y ppa:xtradeb/apps
+    - apt-get update
+
+    # Check chromium package version and save full version
+    - apt-cache madison chromium | grep xtradeb/apps | awk '{print $3}' > current_chromium_version.txt
+
+    # Extract only major version (e.g., 129.0) from the full version
+    - awk -F '.' '{print $1 "." $2}' current_chromium_version.txt > short_chromium_version.txt
+
+    # Compare current and last versions of chromium
+    - if [ -f last_chromium_version.txt ]; then
+        diff last_chromium_version.txt current_chromium_version.txt || true;
+      fi
+  artifacts:
+    paths:
+      - current_chromium_version.txt
+      - short_chromium_version.txt
+
+clone_repo:
+  stage: clone
+  needs:
+    - check_chromium_update
+  script:
+    # Clone the repository with Dockerfile
+    - git clone ${REPO_URL}
+  artifacts:
+    paths:
+      - images/  # Save cloned repo as an artifact to be used in later stages
+
+build_image:
+  stage: build
+  needs:
+    - clone_repo
+  script:
+    # If chromium version is updated, build the Docker image
+    - if [ ! -f last_chromium_version.txt ] || ! diff last_chromium_version.txt current_chromium_version.txt >/dev/null; then
+        echo "Chromium updated, building the image.";
+
+        # Navigate to the directory with the Dockerfile
+        cd images/${DOCKERFILE_PATH%/*}
+
+        # Build Docker image using the short version for tagging
+        docker buildx build --no-cache --build-arg BASE_IMAGE_TAG=${BASE_IMAGE_TAG} \
+          --platform ${PLATFORM} \
+          -t ${IMAGE_NAME}:$(cat ../../../short_chromium_version.txt) \
+          -t ${IMAGE_NAME}:latest \
+          --push -f ${DOCKERFILE_PATH} .;
+
+        # Save the current chromium version
+        mv ../../../current_chromium_version.txt ../../../last_chromium_version.txt;
+      else
+        echo "No update, skipping build.";
+      fi
+  only:
+    - schedules
+  cache:
+    key: chromium-version-cache
+    paths:
+      - last_chromium_version.txt
+  artifacts:
+    paths:
+      - last_chromium_version.txt
