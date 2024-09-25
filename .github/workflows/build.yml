@@ -20,11 +20,16 @@ jobs:
           sudo add-apt-repository -y ppa:xtradeb/apps
           sudo apt-get update
 
+      - name: Ensure cache path exists
+        run: |
+          # Ensure the directory for caching exists
+          mkdir -p current_chromium_version.txt
+
       - name: Restore last Chromium version from cache
         id: cache_last_version
         uses: actions/cache@v3
         with:
-          path: last_chromium_version.txt # Restore the last saved Chromium version
+          path: current_chromium_version.txt # Correct path for restoring the cache
           key: chromium-version-cache
           restore-keys: |
             chromium-version-cache
