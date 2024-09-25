@@ -2,19 +2,20 @@ name: Build and Push Docker Image
 
 on:
   schedule:
-    - cron: '0 0 * * *'
-  workflow_dispatch:
+    - cron: '0 0 * * *' # Daily schedule trigger
+  workflow_dispatch: # Manual trigger option
 
 jobs:
   check_chromium_version:
     runs-on: ubuntu-22.04
     outputs:
-      build_required: ${{ steps.compare_versions.outputs.build_required }}
-      short_version: ${{ steps.get_short_version.outputs.short_version }}
+      build_required: ${{ steps.compare_versions.outputs.build_required }} # Pass build requirement as output
+      short_version: ${{ steps.get_short_version.outputs.short_version }} # Pass short version as output
 
     steps:
       - name: Set up the environment
         run: |
+          # Install necessary packages and add repository for Chromium
           sudo apt-get update && sudo apt-get install -y software-properties-common
           sudo add-apt-repository -y ppa:xtradeb/apps
           sudo apt-get update
@@ -23,7 +24,7 @@ jobs:
         id: cache_last_version
         uses: actions/cache@v3
         with:
-          path: last_chromium_version.txt
+          path: last_chromium_version.txt # Cache the last saved Chromium version
           key: chromium-version-cache
           restore-keys: |
             chromium-version-cache
@@ -31,57 +32,65 @@ jobs:
       - name: Check Chromium Version
         id: get_full_version
         run: |
+          # Fetch the latest version of Chromium from the repository
           apt-cache madison chromium | grep xtradeb/apps | awk '{print $3}' > current_chromium_version.txt
-          echo "full_version=$(cat current_chromium_version.txt)" >> $GITHUB_ENV
+          echo "full_version=$(cat current_chromium_version.txt)" >> $GITHUB_ENV # Save version to environment variable
 
       - name: Extract Short Version
         id: get_short_version
         run: |
+          # Extract the short version (major.minor) from the full version
           awk -F '.' '{print $1 "." $2}' current_chromium_version.txt > short_chromium_version.txt
-          echo "short_version=$(cat short_chromium_version.txt)" >> $GITHUB_ENV
+          echo "short_version=$(cat short_chromium_version.txt)" >> $GITHUB_ENV # Save short version to environment
 
       - name: Compare with the last version
         id: compare_versions
         run: |
+          # Compare current Chromium version with the last saved version
           if [ -f last_chromium_version.txt ]; then
             if diff last_chromium_version.txt current_chromium_version.txt > /dev/null; then
+              echo "Chromium version has not changed. Skipping build."
               echo "build_required=false" >> $GITHUB_ENV
             else
+              echo "Chromium version has been updated."
               echo "build_required=true" >> $GITHUB_ENV
             fi
           else
+            echo "No previous version found. Proceeding with build."
             echo "build_required=true" >> $GITHUB_ENV
+          fi # Closing the if block
 
       - name: Cache the current Chromium version
         if: always()
         uses: actions/cache@v3
         with:
-          path: current_chromium_version.txt
+          path: current_chromium_version.txt # Save the current Chromium version
           key: chromium-version-cache
           restore-keys: |
             chromium-version-cache
 
   build_and_push:
     needs: check_chromium_version
-    if: needs.check_chromium_version.outputs.build_required == 'true'
+    if: needs.check_chromium_version.outputs.build_required == 'true' # Only run if build is required
     runs-on: ubuntu-latest
 
     steps:
       - name: Set up Docker
         run: |
+          # Install Docker using the official script
           curl -fsSL https://get.docker.com -o get-docker.sh
           sudo sh get-docker.sh
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKERHUB.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKERHUB.DOCKER_PASSWORD }}
+          username: ${{ secrets.DOCKERHUB.DOCKER_USERNAME }} # Docker Hub username
+          password: ${{ secrets.DOCKERHUB.DOCKER_PASSWORD }} # Docker Hub password
 
       - name: Clone Dockerfile Repository
         uses: actions/checkout@v3
         with:
-          repository: erolatex/images
+          repository: erolatex/images # Clone your Dockerfile repository
           path: images
 
       - name: Set up Docker Buildx
@@ -89,6 +98,7 @@ jobs:
 
       - name: Build and Push Docker Image
         run: |
+          # Build and push the Docker image using the specified platforms
           cd images/static/chromium
           docker buildx build --no-cache --build-arg BASE_IMAGE_TAG=1.0.1 \
             --platform linux/amd64,linux/arm64 \
