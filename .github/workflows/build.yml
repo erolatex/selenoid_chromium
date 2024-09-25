@@ -29,13 +29,13 @@ jobs:
         id: get_full_version
         run: |
           apt-cache madison chromium | grep xtradeb/apps | awk '{print $3}' > current_chromium_version.txt
-          echo "::set-output name=full_version::$(cat current_chromium_version.txt)"
+          echo "full_version=$(cat current_chromium_version.txt)" >> $GITHUB_ENV
 
       - name: Extract Short Version
         id: get_short_version
         run: |
           awk -F '.' '{print $1 "." $2}' current_chromium_version.txt > short_chromium_version.txt
-          echo "::set-output name=short_version::$(cat short_chromium_version.txt)"
+          echo "short_version=$(cat short_chromium_version.txt)" >> $GITHUB_ENV
 
       - name: Compare with the last version
         id: compare_versions
@@ -43,15 +43,14 @@ jobs:
           if [ -f last_chromium_version.txt ]; then
             if diff last_chromium_version.txt current_chromium_version.txt > /dev/null; then
               echo "Chromium version has not changed. Skipping build."
-              echo "::set-output name=build_required::false"
+              echo "build_required=false" >> $GITHUB_ENV
             else
               echo "Chromium version has been updated."
-              echo "::set-output name=build_required::true"
+              echo "build_required=true" >> $GITHUB_ENV
             fi
           else
             echo "No previous version found. Proceeding with build."
-            echo "::set-output name=build_required::true"
-          fi
+            echo "build_required=true" >> $GITHUB_ENV
 
       - name: Cache the current Chromium version
         if: always()
@@ -64,7 +63,7 @@ jobs:
 
   build_and_push:
     needs: check_chromium_version
-    if: needs.check_chromium_version.outputs.build_required == 'true'
+    if: env.build_required == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -93,6 +92,6 @@ jobs:
           cd images/static/chromium
           docker buildx build --no-cache --build-arg BASE_IMAGE_TAG=1.0.1 \
             --platform linux/amd64,linux/arm64 \
-            -t erolatex/selenoid_chromium:${{ needs.check_chromium_version.outputs.short_version }} \
+            -t erolatex/selenoid_chromium:${{ env.short_version }} \
             -t erolatex/selenoid_chromium:latest \
             --push .
