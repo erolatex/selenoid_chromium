@@ -6,16 +6,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  check_chromium_and_build:
+  check_chromium_version:
     runs-on: ubuntu-22.04
+    outputs:
+      short_version: ${{ steps.get_short_version.outputs.short_version }}
+      full_version: ${{ steps.get_full_version.outputs.full_version }}
 
     steps:
-      - name: Set up Docker
-        # Install Docker on the runner
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y docker.io
-
       - name: Set up the environment
         run: |
           sudo apt-get update && sudo apt-get install -y software-properties-common
@@ -23,69 +20,54 @@ jobs:
           sudo apt-get update
 
       - name: Check Chromium Version
+        id: get_full_version
         run: |
           apt-cache madison chromium | grep xtradeb/apps | awk '{print $3}' > current_chromium_version.txt
-          awk -F '.' '{print $1 "." $2}' current_chromium_version.txt > short_chromium_version.txt
-        id: check_version
+        outputs:
+          full_version: ${{ steps.get_full_version.outputs.full_version }}
 
-      - name: Compare versions
+      - name: Extract Short Version
+        id: get_short_version
         run: |
-          if [ -s last_chromium_version.txt ]; then
-            diff last_chromium_version.txt current_chromium_version.txt || true;
-          else
-            echo "No previous version found, forcing Docker build.";
-            exit 1;  # Force Docker build on first run or if file is empty
-          fi
-        id: version_check
+          awk -F '.' '{print $1 "." $2}' current_chromium_version.txt > short_chromium_version.txt
+        outputs:
+          short_version: ${{ steps.get_short_version.outputs.short_version }}
+
+      - name: Save versions for future steps
+        run: |
+          echo "Full version: $(cat current_chromium_version.txt)"
+          echo "Short version: $(cat short_chromium_version.txt)"
+
+  build_and_push:
+    needs: check_chromium_version
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Docker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker.io
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKERHUB.DOCKER_PASSWORD }}
 
       - name: Clone Dockerfile Repository
-        if: failure() || steps.version_check.outcome == 'failure'
         uses: actions/checkout@v3
         with:
           repository: erolatex/images
           path: images
 
       - name: Set up Docker Buildx
-        if: failure() || steps.version_check.outcome == 'failure'
         uses: docker/setup-buildx-action@v2
 
-      - name: Log in to Docker Hub
-        if: failure() || steps.version_check.outcome == 'failure'
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
       - name: Build and Push Docker Image
-        if: failure() || steps.version_check.outcome == 'failure'
         run: |
           cd images/static/chromium
           docker buildx build --no-cache --build-arg BASE_IMAGE_TAG=1.0.1 \
             --platform linux/amd64,linux/arm64 \
-            -t erolatex/selenoid_chromium:$(cat ../../../short_chromium_version.txt) \
+            -t erolatex/selenoid_chromium:${{ needs.check_chromium_version.outputs.short_version }} \
             -t erolatex/selenoid_chromium:latest \
             --push .
-
-      - name: Save current Chromium version
-        if: failure() || steps.version_check.outcome == 'failure'
-        run: |
-          echo "Saving the current Chromium version."
-          cp current_chromium_version.txt last_chromium_version.txt
-
-      - name: Ensure last version file exists and is not empty
-        run: |
-          if [ -s last_chromium_version.txt ]; then
-            echo "File last_chromium_version.txt exists and is not empty."
-          else
-            echo "File last_chromium_version.txt is missing or empty."
-            exit 1;
-          fi
-
-      - name: Cache last version
-        if: success()
-        uses: actions/cache@v3
-        with:
-          path: ${{ github.workspace }}/last_chromium_version.txt
-          key: chromium-version-cache
-          restore-keys: |
-            chromium-version-cache
