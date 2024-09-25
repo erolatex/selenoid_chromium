@@ -15,11 +15,11 @@ jobs:
 
     steps:
       - name: Set up the environment
-        # The environment setup is already done in the base image, so this step can be skipped if not needed.
+        # Install necessary tools and add the PPA for Chromium (without sudo)
         run: |
-          sudo apt-get update && sudo apt-get install -y software-properties-common
-          sudo add-apt-repository -y ppa:xtradeb/apps
-          sudo apt-get update
+          apt-get update && apt-get install -y software-properties-common
+          add-apt-repository -y ppa:xtradeb/apps
+          apt-get update
 
       - name: Check Chromium Version
         # Fetch the Chromium version and extract the major version (e.g., 129.0)
