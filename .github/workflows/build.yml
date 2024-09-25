@@ -2,17 +2,15 @@ name: Build and Push Docker Image
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # Ежедневный триггер в 00:00
-  workflow_dispatch:  # Ручной запуск
+    - cron: '0 0 * * *'  # Daily job
+  workflow_dispatch:  # Manual trigger
 
 jobs:
   check_chromium_version:
     runs-on: ubuntu-22.04
-    outputs:
-      build_required: ${{ steps.compare_versions.outputs.build_required }}
-      short_version: ${{ steps.get_short_version.outputs.short_version }}
 
     steps:
+      # Setup the environment
       - name: Set up environment
         run: |
           sudo apt-get update
@@ -20,9 +18,11 @@ jobs:
           sudo add-apt-repository -y ppa:xtradeb/apps
           sudo apt-get update
 
+      # Create cache directory if not exists
       - name: Create cache directory
         run: mkdir -p ./cache
 
+      # Restore the last cached Chromium version
       - name: Restore last Chromium version from cache
         id: cache_last_version
         uses: actions/cache@v3
@@ -30,18 +30,21 @@ jobs:
           path: ./cache/current_chromium_version.txt
           key: chromium-version-cache
 
+      # Fetch the latest Chromium version
       - name: Check Chromium Version
         id: get_full_version
         run: |
           apt-cache madison chromium | grep xtradeb/apps | awk '{print $3}' > ./cache/current_chromium_version.txt
           echo "full_version=$(cat ./cache/current_chromium_version.txt)" >> $GITHUB_ENV
 
+      # Extract the short version (major.minor)
       - name: Extract Short Version
         id: get_short_version
         run: |
           awk -F '.' '{print $1 "." $2}' ./cache/current_chromium_version.txt > ./cache/short_chromium_version.txt
           echo "short_version=$(cat ./cache/short_chromium_version.txt)" >> $GITHUB_ENV
 
+      # Compare current Chromium version with the last cached one
       - name: Compare with the last version
         id: compare_versions
         run: |
@@ -57,15 +60,17 @@ jobs:
               echo "build_required=true" >> $GITHUB_ENV
             fi
           fi
-        outputs:
+        env:
           build_required: ${{ steps.compare_versions.outputs.build_required }}
 
+      # Save the current Chromium version in the cache
       - name: Cache the current Chromium version
         uses: actions/cache@v3
         with:
           path: ./cache/current_chromium_version.txt
           key: chromium-version-cache-${{ github.run_id }}
 
+      # Post-action cache save
       - name: Post Cache the current Chromium version
         if: always()
         run: |
@@ -75,32 +80,38 @@ jobs:
   build_and_push:
     needs: check_chromium_version
     runs-on: ubuntu-22.04
-    if: needs.check_chromium_version.outputs.build_required == 'true'
+    if: env.build_required == 'true'
+
     steps:
+      # Clone the Dockerfile repository
       - name: Clone Dockerfile Repository
         uses: actions/checkout@v2
         with:
           repository: erolatex/selenoid_chromium
           path: images/static/chromium
 
+      # Set up Docker Buildx for cross-platform builds
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v1
 
+      # Log in to Docker Hub
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
+      # Build and push the Docker image
       - name: Build and Push Docker Image
         run: |
           cd images/static/chromium
           docker buildx build --no-cache --build-arg BASE_IMAGE_TAG=1.0.1 \
             --platform linux/amd64,linux/arm64 \
-            -t erolatex/selenoid_chromium:${{ needs.check_chromium_version.outputs.short_version }} \
+            -t erolatex/selenoid_chromium:${{ env.short_version }} \
             -t erolatex/selenoid_chromium:latest \
             --push .
 
+      # Post Docker login action
       - name: Post Log in to Docker Hub
         if: always()
         uses: docker/login-action@v2
