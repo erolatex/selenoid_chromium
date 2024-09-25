@@ -54,7 +54,6 @@ jobs:
           else
             echo "No previous version found. Proceeding with build."
             echo "::set-output name=build_required::true"
-          fi
 
       - name: Cache the current Chromium version
         if: always()
