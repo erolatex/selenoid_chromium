@@ -38,22 +38,19 @@ jobs:
         id: get_short_version
         run: |
           awk -F '.' '{print $1 "." $2}' current_chromium_version.txt > short_chromium_version.txt
-          echo "::set-output name=short_version::$(cat short_chromium_version.txt)"
+          echo "short_version=$(cat short_chromium_version.txt)" >> $GITHUB_ENV
 
       - name: Compare with the last version
         id: compare_versions
         run: |
           if [ -f last_chromium_version.txt ]; then
             if diff last_chromium_version.txt current_chromium_version.txt > /dev/null; then
-              echo "Chromium version has not changed. Skipping build."
-              echo "::set-output name=build_required::false"
+              echo "build_required=false" >> $GITHUB_ENV
             else
-              echo "Chromium version has been updated."
-              echo "::set-output name=build_required::true"
+              echo "build_required=true" >> $GITHUB_ENV
             fi
           else
-            echo "No previous version found. Proceeding with build."
-            echo "::set-output name=build_required::true"
+            echo "build_required=true" >> $GITHUB_ENV
 
       - name: Cache the current Chromium version
         if: always()
