@@ -1,43 +1,68 @@
-name: Build and Push Chromium Image
+name: Build and Push Docker Image
 
 on:
   workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build even if the image exists'
+        required: false
+        default: 'false'
 
 jobs:
   check_chromium_version:
     runs-on: ubuntu-22.04
     steps:
-      - name: Check Chromium Version
-        run: |
-          apt-cache madison chromium | grep xtradeb/apps | awk '{print $3}' > ./cache/current_chromium_version.txt
-          SHORT_VERSION=$(awk -F '.' '{print $1 "." $2}' ./cache/current_chromium_version.txt)
-          echo "short_version=${SHORT_VERSION}" >> $GITHUB_ENV
+    - name: Set up cache directory
+      run: mkdir -p ./cache
+    
+    - name: Add PPA for Chromium
+      run: |
+        sudo add-apt-repository ppa:xtradeb/apps -y
+        sudo apt-get update
+    
+    - name: Check Chromium Version
+      id: chromium_version
+      run: |
+        apt-cache madison chromium | grep xtradeb/apps | awk '{print $3}' > ./cache/current_chromium_version.txt
+        SHORT_VERSION=$(awk -F '.' '{print $1 "." $2}' ./cache/current_chromium_version.txt)
+        echo "short_version=${SHORT_VERSION}" >> $GITHUB_ENV
 
-      - name: Check Image on Docker Hub
-        run: |
-          curl --silent -f -lSL https://hub.docker.com/v2/repositories/erolatex/selenoid_chromium/tags/${{ env.short_version }}/ || echo "Not Found" > check_result.txt
-        id: check_docker
+    - name: Check Image on Docker Hub
+      id: check_image
+      run: |
+        IMAGE_TAG="${{ secrets.DOCKERHUB.DOCKER_USERNAME }}/selenoid_chromium:${{ env.short_version }}"
+        EXISTING_IMAGE=$(curl -s https://hub.docker.com/v2/repositories/${{ secrets.DOCKERHUB.DOCKER_USERNAME }}/selenoid_chromium/tags/${{ env.short_version }})
+        if [ "$EXISTING_IMAGE" != "" ] && [ "${{ github.event.inputs.force_build }}" != "true" ]; then
+          echo "Docker image for Chromium ${{ env.short_version }} already exists. No build required."
+          echo "::set-output name=build_required::false"
+        else
+          echo "Docker image not found. Build required."
+          echo "::set-output name=build_required::true"
+        fi
 
   build_and_push:
-    needs: check_chromium_version
     runs-on: ubuntu-latest
-    if: failure()
+    needs: check_chromium_version
+    if: steps.check_image.outputs.build_required == 'true'
     steps:
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKERHUB.DOCKER_PASSWORD }}
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKERHUB.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKERHUB.DOCKER_PASSWORD }}
 
-      - name: Clone Repository
-        uses: actions/checkout@v2
+    - name: Clone Repository
+      uses: actions/checkout@v2
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
 
-      - name: Build and Push Docker Image
-        run: |
-          docker buildx build --platform linux/amd64,linux/arm64 \
-            -t erolatex/selenoid_chromium:${{ env.short_version }} \
-            -t erolatex/selenoid_chromium:latest \
-            --push .
+    - name: Build and Push Docker Image
+      run: |
+        docker buildx build --push \
+          --tag ${{ secrets.DOCKERHUB.DOCKER_USERNAME }}/selenoid_chromium:${{ env.short_version }} \
+          --tag ${{ secrets.DOCKERHUB.DOCKER_USERNAME }}/selenoid_chromium:latest \
+          .
+
+    - name: Log out from Docker Hub
+      run: docker logout
