@@ -47,9 +47,12 @@ jobs:
     if: needs.check_chromium_version.outputs.build_required == 'true'
     environment: DOCKERHUB  # Specify the environment here
     steps:
-      # Check out the repository
-      - name: Check out code
+      # Clone the repository containing the Dockerfile
+      - name: Clone Dockerfile Repository
         uses: actions/checkout@v2
+        with:
+          repository: erolatex/images  # Replace with your Dockerfile repository
+          path: dockerfile_repo
 
       # Set up Docker Buildx for cross-platform builds
       - name: Set up Docker Buildx
@@ -59,12 +62,13 @@ jobs:
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}  # No DOCKERHUB prefix
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ secrets.DOCKERHUB.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKERHUB.DOCKER_PASSWORD }}
 
       # Build and Push Docker Image
       - name: Build and Push Docker Image
         run: |
+          cd dockerfile_repo/static/chromium  # Navigate to the directory containing the Dockerfile
           docker buildx build --no-cache \
             --build-arg BASE_IMAGE_TAG=1.0.1 \
             --platform linux/amd64,linux/arm64 \
