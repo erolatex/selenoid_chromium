@@ -22,8 +22,8 @@ jobs:
 
       - name: Ensure cache path exists
         run: |
-          # Ensure the directory for caching exists
-          mkdir -p current_chromium_version.txt
+          # Ensure the file for caching exists (create if missing)
+          touch current_chromium_version.txt
 
       - name: Restore last Chromium version from cache
         id: cache_last_version
