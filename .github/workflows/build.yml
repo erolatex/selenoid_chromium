@@ -2,35 +2,32 @@ name: Build and Push Docker Image
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Daily schedule trigger
-  workflow_dispatch: # Manual trigger option
+    - cron: '0 0 * * *' # Trigger every day at midnight
+  workflow_dispatch: # Allow manual trigger
 
 jobs:
   check_chromium_version:
     runs-on: ubuntu-22.04
     outputs:
-      build_required: ${{ steps.compare_versions.outputs.build_required }} # Pass build requirement as output
-      short_version: ${{ steps.get_short_version.outputs.short_version }} # Pass short version as output
+      build_required: ${{ steps.compare_versions.outputs.build_required }}
+      short_version: ${{ steps.get_short_version.outputs.short_version }}
 
     steps:
-      - name: Set up the environment
+      - name: Set up environment
         run: |
-          # Install necessary packages and add repository for Chromium
-          sudo apt-get update && sudo apt-get install -y software-properties-common
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common
           sudo add-apt-repository -y ppa:xtradeb/apps
           sudo apt-get update
 
-      - name: Ensure cache path exists
-        run: |
-          # Ensure the file for caching exists (create if missing)
-          mkdir -p ./cache # Ensure the directory exists
-          touch ./cache/current_chromium_version.txt
+      - name: Create cache directory
+        run: mkdir -p ./cache
 
       - name: Restore last Chromium version from cache
         id: cache_last_version
         uses: actions/cache@v3
         with:
-          path: ./cache/current_chromium_version.txt # Correct path for restoring the cache
+          path: ./cache/current_chromium_version.txt
           key: chromium-version-cache
           restore-keys: |
             chromium-version-cache
@@ -38,21 +35,18 @@ jobs:
       - name: Check Chromium Version
         id: get_full_version
         run: |
-          # Fetch the latest version of Chromium from the repository
           apt-cache madison chromium | grep xtradeb/apps | awk '{print $3}' > ./cache/current_chromium_version.txt
-          echo "full_version=$(cat ./cache/current_chromium_version.txt)" >> $GITHUB_ENV # Save version to environment variable
+          echo "full_version=$(cat ./cache/current_chromium_version.txt)" >> $GITHUB_ENV
 
       - name: Extract Short Version
         id: get_short_version
         run: |
-          # Extract the short version (major.minor) from the full version
           awk -F '.' '{print $1 "." $2}' ./cache/current_chromium_version.txt > ./cache/short_chromium_version.txt
-          echo "short_version=$(cat ./cache/short_chromium_version.txt)" >> $GITHUB_ENV # Save short version to environment
+          echo "short_version=$(cat ./cache/short_chromium_version.txt)" >> $GITHUB_ENV
 
       - name: Compare with the last version
         id: compare_versions
         run: |
-          # Compare current Chromium version with the last saved version or trigger build if cache is missing
           if [ ! -f ./cache/last_chromium_version.txt ]; then
             echo "No previous version found. Proceeding with build."
             echo "build_required=true" >> $GITHUB_ENV
@@ -72,33 +66,30 @@ jobs:
       - name: Cache the current Chromium version
         uses: actions/cache@v3
         with:
-          path: ./cache/current_chromium_version.txt # Save the current Chromium version to cache
-          key: chromium-version-cache-${{ github.run_id }} # Add a unique key
-          restore-keys: |
-            chromium-version-cache
+          path: ./cache/current_chromium_version.txt
+          key: chromium-version-cache-${{ github.run_id }}
 
   build_and_push:
     needs: check_chromium_version
-    if: needs.check_chromium_version.outputs.build_required == 'true' # Only run if build is required
+    if: needs.check_chromium_version.outputs.build_required == 'true'
     runs-on: ubuntu-latest
 
     steps:
       - name: Set up Docker
         run: |
-          # Install Docker using the official script
           curl -fsSL https://get.docker.com -o get-docker.sh
           sudo sh get-docker.sh
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKERHUB.DOCKER_USERNAME }} # Docker Hub username
-          password: ${{ secrets.DOCKERHUB.DOCKER_PASSWORD }} # Docker Hub password
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Clone Dockerfile Repository
         uses: actions/checkout@v3
         with:
-          repository: erolatex/images # Clone your Dockerfile repository
+          repository: erolatex/images
           path: images
 
       - name: Set up Docker Buildx
@@ -106,7 +97,6 @@ jobs:
 
       - name: Build and Push Docker Image
         run: |
-          # Build and push the Docker image using the specified platforms
           cd images/static/chromium
           docker buildx build --no-cache --build-arg BASE_IMAGE_TAG=1.0.1 \
             --platform linux/amd64,linux/arm64 \
