@@ -13,6 +13,13 @@ jobs:
       image: erolatex/selenoid_base_image:1.0.1
 
     steps:
+      - name: Create last version file if not exists
+        # Create an empty last_chromium_version.txt file if it does not exist
+        run: |
+          if [ ! -f last_chromium_version.txt ]; then
+            touch last_chromium_version.txt
+          fi
+
       - name: Set up the environment
         run: |
           apt-get update && apt-get install -y software-properties-common
@@ -70,7 +77,6 @@ jobs:
 
       - name: Cache last version
         if: steps.version_check.outcome == 'failure'
-        # Make sure the last_chromium_version.txt file is cached
         uses: actions/cache@v3
         with:
           path: last_chromium_version.txt
