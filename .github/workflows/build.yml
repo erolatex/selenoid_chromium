@@ -23,13 +23,14 @@ jobs:
       - name: Ensure cache path exists
         run: |
           # Ensure the file for caching exists (create if missing)
-          touch current_chromium_version.txt
+          mkdir -p ./cache # Ensure the directory exists
+          touch ./cache/current_chromium_version.txt
 
       - name: Restore last Chromium version from cache
         id: cache_last_version
         uses: actions/cache@v3
         with:
-          path: current_chromium_version.txt # Correct path for restoring the cache
+          path: ./cache/current_chromium_version.txt # Correct path for restoring the cache
           key: chromium-version-cache
           restore-keys: |
             chromium-version-cache
@@ -38,25 +39,25 @@ jobs:
         id: get_full_version
         run: |
           # Fetch the latest version of Chromium from the repository
-          apt-cache madison chromium | grep xtradeb/apps | awk '{print $3}' > current_chromium_version.txt
-          echo "full_version=$(cat current_chromium_version.txt)" >> $GITHUB_ENV # Save version to environment variable
+          apt-cache madison chromium | grep xtradeb/apps | awk '{print $3}' > ./cache/current_chromium_version.txt
+          echo "full_version=$(cat ./cache/current_chromium_version.txt)" >> $GITHUB_ENV # Save version to environment variable
 
       - name: Extract Short Version
         id: get_short_version
         run: |
           # Extract the short version (major.minor) from the full version
-          awk -F '.' '{print $1 "." $2}' current_chromium_version.txt > short_chromium_version.txt
-          echo "short_version=$(cat short_chromium_version.txt)" >> $GITHUB_ENV # Save short version to environment
+          awk -F '.' '{print $1 "." $2}' ./cache/current_chromium_version.txt > ./cache/short_chromium_version.txt
+          echo "short_version=$(cat ./cache/short_chromium_version.txt)" >> $GITHUB_ENV # Save short version to environment
 
       - name: Compare with the last version
         id: compare_versions
         run: |
           # Compare current Chromium version with the last saved version or trigger build if cache is missing
-          if [ ! -f last_chromium_version.txt ]; then
+          if [ ! -f ./cache/last_chromium_version.txt ]; then
             echo "No previous version found. Proceeding with build."
             echo "build_required=true" >> $GITHUB_ENV
           else
-            if diff last_chromium_version.txt current_chromium_version.txt > /dev/null; then
+            if diff ./cache/last_chromium_version.txt ./cache/current_chromium_version.txt > /dev/null; then
               echo "Chromium version has not changed. Skipping build."
               echo "build_required=false" >> $GITHUB_ENV
             else
@@ -66,12 +67,12 @@ jobs:
           fi
 
       - name: Clear existing cache (optional)
-        run: rm -rf current_chromium_version.txt
+        run: rm -rf ./cache/current_chromium_version.txt
 
       - name: Cache the current Chromium version
         uses: actions/cache@v3
         with:
-          path: current_chromium_version.txt # Save the current Chromium version to cache
+          path: ./cache/current_chromium_version.txt # Save the current Chromium version to cache
           key: chromium-version-cache-${{ github.run_id }} # Add a unique key
           restore-keys: |
             chromium-version-cache
