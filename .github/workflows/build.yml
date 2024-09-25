@@ -34,33 +34,34 @@ jobs:
 
       - name: Compare versions
         run: |
-          if [ -f last_chromium_version.txt ]; then
+          if [ -s last_chromium_version.txt ]; then
             diff last_chromium_version.txt current_chromium_version.txt || true;
           else
-            echo "No previous version found."
+            echo "No previous version found, forcing Docker build.";
+            exit 1;  # Force Docker build on first run or if file is empty
           fi
         id: version_check
 
       - name: Clone Dockerfile Repository
-        if: steps.version_check.outcome == 'failure'
+        if: failure() || steps.version_check.outcome == 'failure'
         uses: actions/checkout@v3
         with:
           repository: erolatex/images
           path: images
 
       - name: Set up Docker Buildx
-        if: steps.version_check.outcome == 'failure'
+        if: failure() || steps.version_check.outcome == 'failure'
         uses: docker/setup-buildx-action@v2
 
       - name: Log in to Docker Hub
-        if: steps.version_check.outcome == 'failure'
+        if: failure() || steps.version_check.outcome == 'failure'
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and Push Docker Image
-        if: steps.version_check.outcome == 'failure'
+        if: failure() || steps.version_check.outcome == 'failure'
         run: |
           cd images/static/chromium
           docker buildx build --no-cache --build-arg BASE_IMAGE_TAG=1.0.1 \
@@ -70,16 +71,26 @@ jobs:
             --push .
 
       - name: Save current Chromium version
-        if: steps.version_check.outcome == 'failure'
+        if: failure() || steps.version_check.outcome == 'failure'
         run: |
           echo "Saving the current Chromium version."
           cp current_chromium_version.txt last_chromium_version.txt
 
+      - name: Ensure last version file exists and is not empty
+        # Check if the last version file exists and is not empty before caching
+        run: |
+          if [ -s last_chromium_version.txt ]; then
+            echo "File last_chromium_version.txt exists and is not empty."
+          else
+            echo "File last_chromium_version.txt is missing or empty."
+            exit 1;
+          fi
+
       - name: Cache last version
-        if: steps.version_check.outcome == 'failure'
+        if: success()
         uses: actions/cache@v3
         with:
-          path: last_chromium_version.txt
+          path: ${{ github.workspace }}/last_chromium_version.txt
           key: chromium-version-cache
           restore-keys: |
             chromium-version-cache
