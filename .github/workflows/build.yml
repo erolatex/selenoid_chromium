@@ -8,9 +8,6 @@ on:
 jobs:
   check_chromium_version:
     runs-on: ubuntu-22.04
-    outputs:
-      short_version: ${{ steps.get_short_version.outputs.short_version }}
-      full_version: ${{ steps.get_full_version.outputs.full_version }}
 
     steps:
       - name: Set up the environment
@@ -19,27 +16,55 @@ jobs:
           sudo add-apt-repository -y ppa:xtradeb/apps
           sudo apt-get update
 
+      - name: Restore last Chromium version from cache
+        id: cache_last_version
+        uses: actions/cache@v3
+        with:
+          path: last_chromium_version.txt
+          key: chromium-version-cache
+          restore-keys: |
+            chromium-version-cache
+
       - name: Check Chromium Version
         id: get_full_version
         run: |
           apt-cache madison chromium | grep xtradeb/apps | awk '{print $3}' > current_chromium_version.txt
-        outputs:
-          full_version: ${{ steps.get_full_version.outputs.full_version }}
+          echo "::set-output name=full_version::$(cat current_chromium_version.txt)"
 
       - name: Extract Short Version
         id: get_short_version
         run: |
           awk -F '.' '{print $1 "." $2}' current_chromium_version.txt > short_chromium_version.txt
-        outputs:
-          short_version: ${{ steps.get_short_version.outputs.short_version }}
+          echo "::set-output name=short_version::$(cat short_chromium_version.txt)"
 
-      - name: Save versions for future steps
+      - name: Compare with the last version
+        id: compare_versions
         run: |
-          echo "Full version: $(cat current_chromium_version.txt)"
-          echo "Short version: $(cat short_chromium_version.txt)"
+          if [ -f last_chromium_version.txt ]; then
+            if diff last_chromium_version.txt current_chromium_version.txt > /dev/null; then
+              echo "Chromium version has not changed. Skipping build."
+              echo "::set-output name=build_required::false"
+            else
+              echo "Chromium version has been updated."
+              echo "::set-output name=build_required::true"
+            fi
+          else
+            echo "No previous version found. Proceeding with build."
+            echo "::set-output name=build_required::true"
+          fi
+
+      - name: Cache the current Chromium version
+        if: always()
+        uses: actions/cache@v3
+        with:
+          path: current_chromium_version.txt
+          key: chromium-version-cache
+          restore-keys: |
+            chromium-version-cache
 
   build_and_push:
     needs: check_chromium_version
+    if: needs.check_chromium_version.outputs.build_required == 'true'
     runs-on: ubuntu-latest
 
     steps:
