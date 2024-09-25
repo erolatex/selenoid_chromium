@@ -25,20 +25,12 @@ jobs:
           awk -F '.' '{print $1 "." $2}' current_chromium_version.txt > short_chromium_version.txt
         id: check_version
 
-      - name: Cache last version
-        # Check if the file exists before trying to cache
-        if: steps.check_version.outputs.current_chromium_version != ''
-        uses: actions/cache@v3
-        with:
-          path: last_chromium_version.txt
-          key: chromium-version-cache
-          restore-keys: |
-            chromium-version-cache
-
       - name: Compare versions
         run: |
           if [ -f last_chromium_version.txt ]; then
             diff last_chromium_version.txt current_chromium_version.txt || true;
+          else
+            echo "No previous version found."
           fi
         id: version_check
 
@@ -73,4 +65,15 @@ jobs:
       - name: Save current Chromium version
         if: steps.version_check.outcome == 'failure'
         run: |
+          echo "Saving the current Chromium version."
           cp current_chromium_version.txt last_chromium_version.txt
+
+      - name: Cache last version
+        if: steps.version_check.outcome == 'failure'
+        # Make sure the last_chromium_version.txt file is cached
+        uses: actions/cache@v3
+        with:
+          path: last_chromium_version.txt
+          key: chromium-version-cache
+          restore-keys: |
+            chromium-version-cache
