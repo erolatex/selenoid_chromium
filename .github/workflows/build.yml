@@ -2,8 +2,8 @@ name: Build and Push Docker Image
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Trigger every day at midnight
-  workflow_dispatch: # Allow manual trigger
+    - cron: '0 0 * * *' # Запуск каждый день в полночь
+  workflow_dispatch: # Для ручного запуска
 
 jobs:
   check_chromium_version:
@@ -29,8 +29,6 @@ jobs:
         with:
           path: ./cache/current_chromium_version.txt
           key: chromium-version-cache
-          restore-keys: |
-            chromium-version-cache
 
       - name: Check Chromium Version
         id: get_full_version
