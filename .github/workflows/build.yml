@@ -65,12 +65,14 @@ jobs:
             fi
           fi
 
+      - name: Clear existing cache (optional)
+        run: rm -rf current_chromium_version.txt
+
       - name: Cache the current Chromium version
-        if: always()
         uses: actions/cache@v3
         with:
           path: current_chromium_version.txt # Save the current Chromium version to cache
-          key: chromium-version-cache
+          key: chromium-version-cache-${{ github.run_id }} # Add a unique key
           restore-keys: |
             chromium-version-cache
 
