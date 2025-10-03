@@ -13,48 +13,53 @@ jobs:
       short_version: ${{ steps.get_chromium_version.outputs.short_version }}
     steps:
       - name: Set up environment
+        shell: bash
         run: |
-          # Install required tools and add Chromium PPA
-          sudo apt-get update
-          sudo apt-get install -y software-properties-common jq curl
+          # Use non-interactive APT to avoid hangs
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -yq
+          sudo apt-get install -yq --no-install-recommends software-properties-common jq curl
+          # Add xtradeb/apps PPA and refresh package lists
           sudo add-apt-repository -y ppa:xtradeb/apps
-          sudo apt-get update
+          sudo apt-get update -yq
 
       - name: Check Chromium Version
         id: get_chromium_version
         shell: bash
         run: |
-          # Extract the latest version from xtradeb/apps PPA
-          VERSION=$(apt-cache madison chromium | awk '/xtradeb\/apps/ {print $3; exit}')
-          if [[ -z "$VERSION" ]]; then
-            echo "Chromium version not found from PPA" >&2
+          # Determine Chromium candidate version (what apt would actually install)
+          PACKAGE="chromium"
+          VERSION=$(apt-cache policy "$PACKAGE" | awk '/Candidate:/ {print $2}')
+          if [[ -z "$VERSION" || "$VERSION" == "(none)" ]]; then
+            echo "Chromium version not found for package $PACKAGE" >&2
             exit 1
           fi
 
-          # Use only major.minor for tagging
+          # Tag format: major.minor
           SHORT_VERSION=$(awk -F '.' '{print $1 "." $2}' <<< "$VERSION")
           if [[ -z "$SHORT_VERSION" ]]; then
-            echo "Failed to calculate short_version" >&2
+            echo "Failed to calculate short_version from $VERSION" >&2
             exit 1
           fi
 
+          echo "Chromium package: $PACKAGE"
           echo "Chromium full version: $VERSION"
           echo "Chromium short version: $SHORT_VERSION"
 
-          # Export as job output (modern way)
+          # Export output (modern way)
           echo "short_version=$SHORT_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Check Image on Docker Hub
         id: check_image
         shell: bash
         run: |
+          # Verify the tag existence on Docker Hub with a simple HTTP status check
           IMAGE_TAG='${{ steps.get_chromium_version.outputs.short_version }}'
           if [[ -z "$IMAGE_TAG" ]]; then
             echo "short_version is empty, aborting" >&2
             exit 1
           fi
 
-          # Check Docker Hub tag existence (200 = exists, 404 = not found)
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             "https://hub.docker.com/v2/repositories/erolatex/selenoid_chromium/tags/${IMAGE_TAG}/")
 
@@ -91,6 +96,7 @@ jobs:
       - name: Build and Push Docker Image
         shell: bash
         run: |
+          # Guard against empty tag
           TAG='${{ needs.check_chromium_version.outputs.short_version }}'
           if [[ -z "$TAG" ]]; then
             echo "TAG is empty, aborting" >&2
