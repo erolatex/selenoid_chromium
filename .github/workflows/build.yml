@@ -12,73 +12,109 @@ jobs:
       build_required: ${{ steps.check_image.outputs.build_required }}
       short_version: ${{ steps.get_chromium_version.outputs.short_version }}
     steps:
-      # Set up the environment and add PPA for Chromium
       - name: Set up environment
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y software-properties-common jq
-          sudo add-apt-repository -y ppa:xtradeb/apps
-          sudo apt-get update
+          # Minimal tools; non-interactive to avoid hangs
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -yq
+          sudo apt-get install -yq --no-install-recommends curl jq
 
-      # Check Chromium Version
       - name: Check Chromium Version
         id: get_chromium_version
+        shell: bash
         run: |
-          apt-cache madison chromium
-          apt-cache madison chromium | grep xtradeb/apps | awk '{print $3}' > current_chromium_version.txt
-          SHORT_VERSION=$(awk -F '.' '{print $1 "." $2}' current_chromium_version.txt)
-          echo "short_version=${SHORT_VERSION}" >> $GITHUB_ENV
-          echo "::set-output name=short_version::${SHORT_VERSION}"
+          set -euo pipefail
 
-      # Check if Docker image with this version exists on Docker Hub
+          # Read pool listing and extract versions that explicitly target 22.04
+          URL="https://ppa.launchpadcontent.net/xtradeb/apps/ubuntu/pool/main/c/chromium/"
+          HTML="$(curl -fsSL "$URL")" || { echo "Failed to fetch $URL" >&2; exit 1; }
+
+          # Match filenames like chromium_141.0.7390.54-<anything>2204<anything>.<ext>
+          # Capture ONLY the numeric version before the first hyphen.
+          mapfile -t VERSIONS_2204 < <(printf '%s' "$HTML" \
+            | grep -oP 'chromium_\K[0-9]+(?:\.[0-9]+){3}(?=-[^"<>]*2204)' \
+            | sort -V | uniq)
+
+          if (( ${#VERSIONS_2204[@]} == 0 )); then
+            echo "No chromium builds for 22.04 found in pool listing" >&2
+            echo "Pool URL checked: $URL" >&2
+            exit 1
+          fi
+
+          VERSION="${VERSIONS_2204[-1]}"
+
+          # Short tag = major.minor
+          SHORT_VERSION="$(awk -F '.' '{print $1 "." $2}' <<< "$VERSION")"
+          if [[ -z "$SHORT_VERSION" ]]; then
+            echo "Failed to compute short_version from $VERSION" >&2
+            exit 1
+          fi
+
+          echo "Chromium full version: $VERSION"
+          echo "Chromium short version: $SHORT_VERSION"
+
+          echo "short_version=$SHORT_VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Check Image on Docker Hub
         id: check_image
+        shell: bash
         run: |
-          IMAGE_TAG="${{ steps.get_chromium_version.outputs.short_version }}"
-          RESPONSE=$(curl -s -f -lSL "https://hub.docker.com/v2/repositories/erolatex/selenoid_chromium/tags/${IMAGE_TAG}/" || echo "Not Found")
-          if [[ "$RESPONSE" == "Not Found" ]]; then
-            echo "Image not found on Docker Hub. Build required."
-            echo "::set-output name=build_required::true"
+          TAG='${{ steps.get_chromium_version.outputs.short_version }}'
+          if [[ -z "$TAG" ]]; then
+            echo "short_version is empty, aborting" >&2
+            exit 1
+          fi
+
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://hub.docker.com/v2/repositories/erolatex/selenoid_chromium/tags/${TAG}/")
+
+          if [[ "$STATUS" == "404" ]]; then
+            echo "build_required=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$STATUS" == "200" ]]; then
+            echo "build_required=false" >> "$GITHUB_OUTPUT"
           else
-            echo "Image exists on Docker Hub. No build required."
-            echo "::set-output name=build_required::false"
+            echo "Unexpected HTTP status from Docker Hub: $STATUS" >&2
+            exit 1
           fi
 
   build_and_push:
     needs: check_chromium_version
     runs-on: ubuntu-latest
     if: needs.check_chromium_version.outputs.build_required == 'true'
-    environment: DOCKERHUB  # Specify the environment here
+    environment: DOCKERHUB
     steps:
-      # Clone the repository containing the Dockerfile
       - name: Clone Dockerfile Repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
-          repository: erolatex/images  # Replace with your Dockerfile repository
+          repository: erolatex/images
           path: dockerfile_repo
 
-      # Set up Docker Buildx for cross-platform builds
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
-      # Log in to Docker Hub using environment secrets
       - name: Log in to Docker Hub
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}  # Corrected reference
-          password: ${{ secrets.DOCKER_PASSWORD }}  # Corrected reference
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # Build and Push Docker Image
       - name: Build and Push Docker Image
+        shell: bash
         run: |
-          cd dockerfile_repo/static/chromium  # Navigate to the directory containing the Dockerfile
+          TAG='${{ needs.check_chromium_version.outputs.short_version }}'
+          if [[ -z "$TAG" ]]; then
+            echo "TAG is empty, aborting" >&2
+            exit 1
+          fi
+
+          cd dockerfile_repo/static/chromium
           docker buildx build --no-cache \
             --build-arg BASE_IMAGE_TAG=1.0.1 \
             --platform linux/amd64,linux/arm64 \
-            -t erolatex/selenoid_chromium:${{ needs.check_chromium_version.outputs.short_version }} \
+            -t erolatex/selenoid_chromium:"$TAG" \
             -t erolatex/selenoid_chromium:latest \
             --push .
 
-      # Log out from Docker Hub
       - name: Log out from Docker Hub
         run: docker logout
