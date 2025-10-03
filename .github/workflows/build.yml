@@ -15,42 +15,37 @@ jobs:
       - name: Set up environment
         shell: bash
         run: |
-          # Use non-interactive APT to avoid hangs
+          # Minimal tools; non-interactive to avoid hangs
           export DEBIAN_FRONTEND=noninteractive
           sudo apt-get update -yq
-          sudo apt-get install -yq --no-install-recommends software-properties-common jq curl
-          # Add xtradeb/apps PPA and refresh package lists
-          sudo add-apt-repository -y ppa:xtradeb/apps
-          sudo apt-get update -yq
+          sudo apt-get install -yq --no-install-recommends curl jq
 
       - name: Check Chromium Version
         id: get_chromium_version
         shell: bash
         run: |
           set -euo pipefail
-          PACKAGE="chromium"
 
-          # Try 1: apt-cache madison (take the first line = newest)
-          VERSION=$(apt-cache madison "$PACKAGE" | awk 'NR==1 {print $3; exit}')
+          # Read pool listing and extract versions that explicitly target 22.04
+          URL="https://ppa.launchpadcontent.net/xtradeb/apps/ubuntu/pool/main/c/chromium/"
+          HTML="$(curl -fsSL "$URL")" || { echo "Failed to fetch $URL" >&2; exit 1; }
 
-          # Try 2: apt-cache policy Candidate
-          if [[ -z "${VERSION:-}" ]]; then
-            VERSION=$(apt-cache policy "$PACKAGE" | sed -n 's/^\s*Candidate:\s*//p' | head -n1)
-            [[ "$VERSION" == "(none)" ]] && VERSION=""
-          fi
+          # Match filenames like chromium_141.0.7390.54-<anything>2204<anything>.<ext>
+          # Capture ONLY the numeric version before the first hyphen.
+          mapfile -t VERSIONS_2204 < <(printf '%s' "$HTML" \
+            | grep -oP 'chromium_\K[0-9]+(?:\.[0-9]+){3}(?=-[^"<>]*2204)' \
+            | sort -V | uniq)
 
-          # If still empty, show diagnostics and fail
-          if [[ -z "${VERSION:-}" ]]; then
-            echo "Failed to detect chromium version via madison/policy" >&2
-            echo "== apt-cache madison chromium =="
-            apt-cache madison "$PACKAGE" || true
-            echo "== apt-cache policy chromium =="
-            apt-cache policy "$PACKAGE" || true
+          if (( ${#VERSIONS_2204[@]} == 0 )); then
+            echo "No chromium builds for 22.04 found in pool listing" >&2
+            echo "Pool URL checked: $URL" >&2
             exit 1
           fi
 
-          # Use major.minor as short version
-          SHORT_VERSION=$(awk -F '.' '{print $1 "." $2}' <<< "$VERSION")
+          VERSION="${VERSIONS_2204[-1]}"
+
+          # Short tag = major.minor
+          SHORT_VERSION="$(awk -F '.' '{print $1 "." $2}' <<< "$VERSION")"
           if [[ -z "$SHORT_VERSION" ]]; then
             echo "Failed to compute short_version from $VERSION" >&2
             exit 1
@@ -59,21 +54,20 @@ jobs:
           echo "Chromium full version: $VERSION"
           echo "Chromium short version: $SHORT_VERSION"
 
-          # Export output (modern way)
           echo "short_version=$SHORT_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Check Image on Docker Hub
         id: check_image
         shell: bash
         run: |
-          IMAGE_TAG='${{ steps.get_chromium_version.outputs.short_version }}'
-          if [[ -z "$IMAGE_TAG" ]]; then
+          TAG='${{ steps.get_chromium_version.outputs.short_version }}'
+          if [[ -z "$TAG" ]]; then
             echo "short_version is empty, aborting" >&2
             exit 1
           fi
 
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://hub.docker.com/v2/repositories/erolatex/selenoid_chromium/tags/${IMAGE_TAG}/")
+            "https://hub.docker.com/v2/repositories/erolatex/selenoid_chromium/tags/${TAG}/")
 
           if [[ "$STATUS" == "404" ]]; then
             echo "build_required=true" >> "$GITHUB_OUTPUT"
