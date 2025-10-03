@@ -27,22 +27,35 @@ jobs:
         id: get_chromium_version
         shell: bash
         run: |
-          # Determine Chromium candidate version (what apt would actually install)
+          set -euo pipefail
           PACKAGE="chromium"
-          VERSION=$(apt-cache policy "$PACKAGE" | awk '/Candidate:/ {print $2}')
-          if [[ -z "$VERSION" || "$VERSION" == "(none)" ]]; then
-            echo "Chromium version not found for package $PACKAGE" >&2
+
+          # Try 1: apt-cache madison (take the first line = newest)
+          VERSION=$(apt-cache madison "$PACKAGE" | awk 'NR==1 {print $3; exit}')
+
+          # Try 2: apt-cache policy Candidate
+          if [[ -z "${VERSION:-}" ]]; then
+            VERSION=$(apt-cache policy "$PACKAGE" | sed -n 's/^\s*Candidate:\s*//p' | head -n1)
+            [[ "$VERSION" == "(none)" ]] && VERSION=""
+          fi
+
+          # If still empty, show diagnostics and fail
+          if [[ -z "${VERSION:-}" ]]; then
+            echo "Failed to detect chromium version via madison/policy" >&2
+            echo "== apt-cache madison chromium =="
+            apt-cache madison "$PACKAGE" || true
+            echo "== apt-cache policy chromium =="
+            apt-cache policy "$PACKAGE" || true
             exit 1
           fi
 
-          # Tag format: major.minor
+          # Use major.minor as short version
           SHORT_VERSION=$(awk -F '.' '{print $1 "." $2}' <<< "$VERSION")
           if [[ -z "$SHORT_VERSION" ]]; then
-            echo "Failed to calculate short_version from $VERSION" >&2
+            echo "Failed to compute short_version from $VERSION" >&2
             exit 1
           fi
 
-          echo "Chromium package: $PACKAGE"
           echo "Chromium full version: $VERSION"
           echo "Chromium short version: $SHORT_VERSION"
 
@@ -53,7 +66,6 @@ jobs:
         id: check_image
         shell: bash
         run: |
-          # Verify the tag existence on Docker Hub with a simple HTTP status check
           IMAGE_TAG='${{ steps.get_chromium_version.outputs.short_version }}'
           if [[ -z "$IMAGE_TAG" ]]; then
             echo "short_version is empty, aborting" >&2
@@ -96,7 +108,6 @@ jobs:
       - name: Build and Push Docker Image
         shell: bash
         run: |
-          # Guard against empty tag
           TAG='${{ needs.check_chromium_version.outputs.short_version }}'
           if [[ -z "$TAG" ]]; then
             echo "TAG is empty, aborting" >&2
