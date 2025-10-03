@@ -24,6 +24,7 @@ jobs:
       - name: Check Chromium Version
         id: get_chromium_version
         run: |
+          apt-cache madison chromium
           apt-cache madison chromium | grep xtradeb/apps | awk '{print $3}' > current_chromium_version.txt
           SHORT_VERSION=$(awk -F '.' '{print $1 "." $2}' current_chromium_version.txt)
           echo "short_version=${SHORT_VERSION}" >> $GITHUB_ENV
